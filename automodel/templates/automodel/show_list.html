@@ -1,7 +1,51 @@
 {% extends "automodel/base.html" %}
 
 {% block container %}
-<div class="container">
-    <h1>{{ data }}</h1>
-</div>
+    <div class="container">
+        <h1>列表页面</h1>
+        <form method="get">
+        {% if content.show_search_form %}
+            <input type="text" name="{{ content.search_key }}" placeholder="请输入搜索内容" class="form-control"
+                   style="width: 200px;display: inline-block" value="{{ content.search_value }}">
+            <button class="btn btn-primary"><span class="glyphicon glyphicon-search"></span></button>
+        {% endif %}
+        </form>
+        <form method="post">
+        {% csrf_token %}
+        {% if content.show_actions_form %}
+            <select name="action" class="form-control" style="width: 200px;display: inline-block">
+                {% for func, desc in content.actions.items %}
+                    <option value="{{ func }}">{{ desc }}</option>
+                {% endfor %}
+                
+            </select>
+            <button class="btn btn-primary">执行</button>
+        {% endif %}
+        {% if content.show_add_btn %}
+            <h3><a href="{{ content.add_url }}">增加</a></h3>
+        {% endif %}
+        <table class="table table-bordered table-striped">
+            <thead>
+            <tr>
+            {% for head in content.head_list %}
+                <td>{{ head }}</td>
+            {% endfor %}
+
+            </tr>
+            </thead>
+            <tbody>
+            {% for data in content.data_list %}
+                <tr>
+                    {% for col in data %}
+                        <td>{{ col }}</td>
+                    {% endfor %}
+                </tr>
+            {% endfor %}
+
+            </tbody>
+        </table>
+    {{ content.pager.bootstrap_html }}
+        </form>
+    </div>
 {% endblock %}
+
