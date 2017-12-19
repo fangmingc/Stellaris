@@ -9,6 +9,9 @@
         <table class="table table-bordered table-striped">
             <thead>
             <tr>
+            {% for head in head_list %}
+                <td>{{ head }}</td>
+            {% endfor %}
 
             </tr>
             </thead>
@@ -23,72 +26,8 @@
 
             </tbody>
         </table>
+    {{ pager.bootstrap_html }}
 
-
-
-        <nav aria-label="Page navigation">
-        <ul class="pagination">
-{#            首页按钮#}
-            {% if current_page != min_page %}
-                <li><a href="{{ current_url }}?page=1"><span aria-hidden="true">首页</span></a></li>
-            {% else %}
-                <li class="disabled"><a href="#"><span aria-hidden="true">首页</span></a></li>
-            {% endif %}
-{#            上一页按钮#}
-            {% if data_list.has_previous %}
-                <li><a href="{{ current_url }}?page={{ data_list.previous_page_number }}" aria-label="Previous"><span
-                        aria-hidden="true">上一页</span></a></li>
-            {% else %}
-                <li class="disabled"><a href="#" aria-label="Previous"><span aria-hidden="true">上一页</span></a></li>
-            {% endif %}
-
-{#            中间主要的页码#}
-            {% if paginator.count <= 10 %}
-{#                总页码少于10页时#}
-                {% for page in paginator.page_range %}
-                    {% if page == current_page %}
-                        <li class="active"><a href="#">{{ page }}</a></li>
-                    {% else %}
-                        <li><a href="{{ current_url }}?page={{ page }}">{{ page }}</a></li>
-                    {% endif %}
-                {% endfor %}
-            {% else %}
-{#                总页码超过10页时#}
-                {% for page in current_range %}
-                    {% if page == current_page %}
-{#                        当前页特殊显示#}
-                        <li class="active"><a href="#">{{ page }}</a></li>
-                    {% else %}
-                        <li><a href="{{ current_url }}?page={{ page }}">{{ page }}</a></li>
-                    {% endif %}
-                {% endfor %}
-
-            {% endif %}
-
-{#            下一页按钮#}
-            {% if data_list.has_next %}
-                <li><a href="{{ current_url }}?page={{ data_list.next_page_number }}" aria-label="Next"><span
-                        aria-hidden="true">下一页</span></a></li>
-            {% else %}
-                <li class="disabled"><a href="#" aria-label="Next"><span aria-hidden="true">下一页</span></a></li>
-            {% endif %}
-
-{#            尾页按钮#}
-            {% if current_page != max_page %}
-                <li><a href="{{ current_url }}?page={{ paginator.num_pages }}"><span aria-hidden="true">尾页</span></a></li>
-            {% else %}
-                <li class="disabled"><a href="#"><span aria-hidden="true">尾页</span></a></li>
-            {% endif %}
-            <li style="line-height: 34px" class="help-block">&nbsp;共{{ paginator.num_pages }}页</li>
-        </ul>
-    </nav>
     </div>
 {% endblock %}
 
-{% block script %}
-    <script>
-    $("table").find("a").each(function () {
-        $(this).attr("href", $(this).attr("href")+"?page={{ current_page }}")
-    })
-    </script>
-{% endblock %}
