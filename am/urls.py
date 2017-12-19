@@ -17,9 +17,7 @@ from django.contrib import admin
 from django.urls import path
 
 from automodel.services import automodel
-from paginator import views
+
 urlpatterns = [
     path("automodel/", automodel.site.urls),
-    path("index/", views.index),
-    path("users/", views.users),
 ]

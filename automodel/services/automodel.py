@@ -4,8 +4,9 @@ from functools import wraps
 from django.shortcuts import HttpResponse, render, reverse, redirect
 from django.urls import path
 from django.utils.safestring import mark_safe
-from django.forms import ModelForm, widgets as wg
+from django.forms import ModelForm
 from django.http.request import QueryDict
+from django.db.models import Q
 
 
 from automodel.services.paginator import Pagination
@@ -15,28 +16,50 @@ class ShowList:
     """
     AutomodelConfig的show视图函数逻辑较多，在此拆分其功能
     """
-    def __init__(self, config):
+    def __init__(self, config, data_list):
         self.config = config
 
         self.model_class = config.model_class
-
-        self.head_list = config.head_list
         self.list_display = config.get_list_display()
+        self.head_list = config.get_head_list()
+        self.show_add_btn = config.get_show_add_btn()
+        self.add_url = config.get_add_url()
 
-    # TODO: 处理好重名问题
-    def get_head_list(self):
-        """获取表头"""
-        result = []
-        if self.head_list:
-            result.extend(self.head_list)
-        else:
-            for field_name in self.list_display:
-                if isinstance(field_name, str):
-                    verbose_name = self.model_class._meta.get_field(field_name).verbose_name
+        self.search_key = config.search_key
+        self.search_value = config.request.GET.get(config.search_key, '')
+        self.show_search_form = config.get_show_search_form()
+
+        self.show_actions_form = config.get_show_actions_form()
+        self.actions = config.get_actions()
+
+        # 分页展示
+        self.pager = Pagination(config.request, len(data_list), per_page_num=2)
+        self.data_list = ShowList.generate_list(data_list[self.pager.start:self.pager.end], config)
+
+    @staticmethod
+    def generate_list(data_list, config):
+        """生成展示信息"""
+        for data_obj in data_list:
+            yield ShowList.generate_column(data_obj, config)
+
+    @staticmethod
+    def generate_column(data_obj, config):
+        """生成每一行"""
+        for item in config.get_list_display():
+            if isinstance(item, str):
+                if hasattr(data_obj, item):
+                    temp = getattr(data_obj, item)
                 else:
-                    verbose_name = field_name(self.config, is_header=True)
-                result.append(verbose_name)
-        return result
+                    raise Exception("数据库没有该字段！")
+            # 针对config类
+            elif isinstance(item, MethodType):
+                temp = item(config=config, data_obj=data_obj)
+            # 针对model
+            elif isinstance(item, FunctionType):
+                temp = item(data_obj)
+            else:
+                raise Exception("使用了无效字段！")
+            yield temp
 
 
 class AutomodelConfig:
@@ -44,9 +67,146 @@ class AutomodelConfig:
 
     # TODO: 补全可配置参数，modelform,搜索,action
     # 可配置参数
-    list_display = []       # 显示项
-    head_list = []          # 显示项的标题
-    show_add_btn = False    # 显示增加按钮
+
+    # 1. 定制显示列
+    list_display = []
+
+    def get_list_display(self):
+        result = []
+
+        if self.list_display:
+            result.extend(self.list_display)
+        else:
+            result.append(self.model_class.__str__)
+
+        result.insert(0, self.checkbox)
+
+        if self.get_show_edit_btn():
+            result.append(self.edit)
+
+        if self.get_show_delete_btn():
+            result.append(self.delete)
+        return result
+
+    # 2. 定制显示项的表头
+    head_list = []
+
+    def get_head_list(self):
+        result = []
+
+        if self.head_list:
+            result.extend(self.head_list)
+
+        else:
+            # 根据展示列生成相应的表头
+            for field_name in self.get_list_display():
+                if isinstance(field_name, str):
+                    verbose_name = self.model_class._meta.get_field(field_name).verbose_name
+
+                elif isinstance(field_name, MethodType):
+                    verbose_name = field_name(self, is_header=True)
+
+                else:
+                    verbose_name = "对象"
+
+                result.append(verbose_name)
+        return result
+
+    # 3. 是否显示增加按钮
+    show_add_btn = False
+
+    def get_show_add_btn(self):
+        if self.show_add_btn:
+            return True
+        return False
+
+    # 4. 是否显示编辑按钮
+    show_edit_btn = False
+
+    def get_show_edit_btn(self):
+        if self.show_edit_btn:
+            return True
+        return False
+
+    # 5. 是否显示删除按钮
+    show_delete_btn = False
+
+    def get_show_delete_btn(self):
+        if self.show_delete_btn:
+            return True
+        return False
+
+    # 6. 使用何种ModelForm
+    model_form_class = None
+
+    def get_model_form_class(self):
+        if self.model_form_class:
+            return self.model_form_class
+
+        # 使用type创建
+        temp_model_form = type('TempModelForm', (ModelForm,), {
+            'Meta': type('Meta', (object,), {
+                "model": self.model_class,
+                "fields": "__all__"
+            })
+        })
+
+        # 常规定义
+        # class TempModelForm(ModelForm):
+        #     class Meta:
+        #         model = self.model_class
+        #         fields = "__all__"
+
+        return temp_model_form
+
+    # 7. 搜索框
+    show_search_form = False
+    search_fields = []
+
+    def get_show_search_form(self):
+        if self.show_search_form:
+            return True
+        return False
+
+    def get_search_fields(self):
+        result = []
+        if self.search_fields:
+            result.extend(self.search_fields)
+        return result
+
+    def get_search_condition(self):
+        # 根据所给字段设置模糊查询
+        search_key = self.request.GET.get(self.search_key, '')  # 确保查询内容不为None,二者择其一
+        condition = Q()
+        condition.connector = "OR"
+        if search_key and self.get_show_search_form():  # 确保查询内容不为None,二者择其一
+            for filed_name in self.get_search_fields():
+                condition.children.append(("%s__contains" % filed_name, search_key))
+        return condition
+
+    # 8. 自定义批量操作/actions
+    show_actions_form = False
+
+    def get_show_actions_form(self):
+        if self.show_search_form:
+            return True
+        return False
+
+    def get_actions(self):
+        result = {}
+        if self.actions:
+            for item in self.actions:
+                result[item.__name__] = item.short_description
+        return result
+
+    def multi_delete(self, request):
+        """批量删除"""
+        pk_list = request.POST.getlist("pk")
+        self.model_class.objects.filter(pk__in=pk_list).delete()
+        return HttpResponse("删除成功")
+
+    multi_delete.short_description = "批量删除"
+    actions = [multi_delete, ]
 
     def __init__(self, model_class):
         self.model_class = model_class
@@ -55,6 +215,7 @@ class AutomodelConfig:
         self.app_model_name = self.app_name, self.model_name
         self.request = None
         self._query_key = "_listfilter"
+        self.search_key = "_query"
 
     # ######### URL相关
     def wrap(self, view_func):
@@ -84,61 +245,20 @@ class AutomodelConfig:
     def urls(self):
         return self.get_urls(), None, None
 
-    def get_list_display(self):
-        """获取需要展示信息列表"""
-        data_list = []
-        if self.list_display:
-            data_list.extend(self.list_display)
-        else:
-            data_list.append(self.model_class.__str__)
-        # 使用self可用于区分方法和函数
-        data_list.insert(0, self.checkbox)
-        data_list.append(self.edit)
-        data_list.append(self.delete)
-        return data_list
-
     # #############     视图函数
     def show_list_view(self, request, *args, **kwargs):
         """视图函数--展示"""
-        # TODO: 把内容都转移到ShowList
 
-        operate = ShowList(self)
+        if request.method == "POST":
+            func = request.POST.get("action")
+            if hasattr(self, func):
+                ret = getattr(self, func)(request)
+                if ret:
+                    return ret
+        data_list = self.model_class.objects.filter(self.get_search_condition())
+        content = ShowList(self, data_list)
 
-        def generate_list(_data_list, config_obj):
-            """生成展示信息"""
-            for data_obj in _data_list:
-                yield generate_column(data_obj, config_obj)
-
-        def generate_column(data_obj, config_obj):
-            """生成每一行"""
-            for item in config_obj.get_list_display():
-                if isinstance(item, str):
-                    if hasattr(data_obj, item):
-                        temp = getattr(data_obj, item)
-                    else:
-                        raise Exception("数据库没有该字段！")
-                # 针对config类
-                elif isinstance(item, MethodType):
-                    temp = item(config_obj=config_obj, data_obj=data_obj)
-                # 针对model
-                elif isinstance(item, FunctionType):
-                    temp = item(data_obj)
-                else:
-                    raise Exception("使用了无效字段！")
-                yield temp
-
-        # TODO: 数据添加搜索,使用Q的高级用法
-        # 分页展示
-        data_list = self.model_class.objects.all()
-        pager = Pagination(request, len(data_list), per_page_num=2)
-        data_list = generate_list(data_list[pager.start:pager.end], self)
-
-        return render(request, "automodel/show_list.html", {
-            "head_list": operate.get_head_list(),
-            "data_list": data_list,
-            "show_add_btn": self.show_add_btn,
-            "add_url": self.get_add_url(),
-            "pager": pager})
+        return render(request, "automodel/show_list.html", {"content": content})
 
     def add_list_view(self, request, *args, **kwargs):
         class TempModelForm(ModelForm):
@@ -156,24 +276,18 @@ class AutomodelConfig:
 
     def change_list_view(self, request, *args, **kwargs):
         """修改视图函数"""
-        # TODO: 使用两种方式创建ModelForm
-        type('TempModelForm', (ModelForm, ), {})
 
-        class TempModelForm(ModelForm):
-            class Meta:
-                model = self.model_class
-                fields = "__all__"
         # 验证修改目标是否存在
         obj = self.model_class.objects.filter(id=kwargs.get("obj_id")).first()
         if not obj:
             return HttpResponse("数据不存在！")
         # get请求获取修改目标的数据
         if request.method == "GET":
-            form = TempModelForm(instance=obj)
+            form = self.get_model_form_class()(instance=obj)
             return render(request, "automodel/change_list.html", {"form": form})
 
         # post请求修改目标的数据
-        form = TempModelForm(data=request.POST, instance=obj)
+        form = self.get_model_form_class()(data=request.POST, instance=obj)
         if not form.is_valid():
             return render(request, "automodel/change_list.html", {"form": form})
         else:
@@ -193,13 +307,13 @@ class AutomodelConfig:
         return redirect(self.get_list_url()+"?%s" % request.GET.get(self._query_key))
 
     # #############     定制列表页面显示的列
-    def checkbox(self, data_obj=None, is_header=False, config_obj=None):
+    def checkbox(self, data_obj=None, is_header=False, config=None):
         """勾选框"""
         if is_header:
             return "选择"
-        return mark_safe('<input type="checkbox" value="%s">' % data_obj.pk)
+        return mark_safe('<input type="checkbox" name="pk" value="%s">' % data_obj.pk)
 
-    def delete(self, data_obj=None, is_header=False, config_obj=None):
+    def delete(self, data_obj=None, is_header=False, config=None):
         """删除按钮"""
         if is_header:
             return "删除"
@@ -207,12 +321,12 @@ class AutomodelConfig:
         if self.request.GET.urlencode():
             params = QueryDict(mutable=True)
             params[self._query_key] = self.request.GET.urlencode()
-            query_str = '<a href="%s?%s">删除</a>' % (config_obj.get_delete_url(data_obj.pk), params.urlencode())
+            query_str = '<a href="%s?%s">删除</a>' % (config.get_delete_url(data_obj.pk), params.urlencode())
         else:
-            query_str = '<a href="%s">删除</a>' % config_obj.get_delete_url(data_obj.pk)
+            query_str = '<a href="%s">删除</a>' % config.get_delete_url(data_obj.pk)
         return mark_safe(query_str)
 
-    def edit(self, data_obj=None, is_header=False, config_obj=None):
+    def edit(self, data_obj=None, is_header=False, config=None):
         """编辑按钮"""
         if is_header:
             return "编辑"
@@ -220,9 +334,9 @@ class AutomodelConfig:
         if self.request.GET.urlencode():
             params = QueryDict(mutable=True)
             params[self._query_key] = self.request.GET.urlencode()
-            query_str = '<a href="%s?%s">编辑</a>' % (config_obj.get_change_url(data_obj.pk), params.urlencode())
+            query_str = '<a href="%s?%s">编辑</a>' % (config.get_change_url(data_obj.pk), params.urlencode())
         else:
-            query_str = '<a href="%s">编辑</a>' % config_obj.get_change_url(data_obj.pk)
+            query_str = '<a href="%s">编辑</a>' % config.get_change_url(data_obj.pk)
         return mark_safe(query_str)
 
     # #############     反向获取url
@@ -255,9 +369,9 @@ class AutomodelSite:
         """分发url"""
         url_patterns = []
 
-        for model_class, config_obj in self._registry.items():
+        for model_class, config in self._registry.items():
             url_patterns.append(
-                path("%s/%s/" % (config_obj.app_name, config_obj.model_name), config_obj.urls)
+                path("%s/%s/" % (config.app_name, config.model_name), config.urls)
             )
 
         return url_patterns

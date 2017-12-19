@@ -4,8 +4,15 @@ from app01 import models
 
 
 class UserConfig(automodel.AutomodelConfig):
-    list_display = ["id", "username", "password", "dep"]
+    list_display = ["id", "username", "password", "email", "dep"]
     show_add_btn = True
+    show_delete_btn = True
+    show_edit_btn = True
+
+    show_search_form = True
+    search_fields = ["username", "email"]
+
+    show_actions_form = True
 
     def extra_url(self):
         from django.urls import path
