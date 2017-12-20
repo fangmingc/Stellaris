@@ -21,6 +21,7 @@ class User(models.Model):
     """用户表"""
     username = models.CharField(verbose_name="用户名", max_length=32)
     password = models.CharField(verbose_name="密码", max_length=32)
+    gender = models.IntegerField(verbose_name="性别", choices=((1, '男'), (2, '女'), (3, '未知')))
     email = models.EmailField(verbose_name="邮箱")
 
     role = models.ManyToManyField(to=Role, verbose_name="用户角色")

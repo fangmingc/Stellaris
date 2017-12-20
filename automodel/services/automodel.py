@@ -1,15 +1,111 @@
 from types import FunctionType, MethodType
 from functools import wraps
+from copy import deepcopy
 
 from django.shortcuts import HttpResponse, render, reverse, redirect
 from django.urls import path
 from django.utils.safestring import mark_safe
 from django.forms import ModelForm
 from django.http.request import QueryDict
-from django.db.models import Q
+from django.db.models import Q, ForeignKey, ManyToManyField
 
 
 from automodel.services.paginator import Pagination
+
+
+class FilterOption:
+    """组合过滤"""
+
+    def __init__(self, field_name, condition=None, is_multi=False, is_choices=False):
+        self.field_name = field_name
+        self.condition = condition
+        self.is_multi = is_multi
+        self.is_choices = is_choices
+
+    def get_queryset(self, _field):
+        if self.condition:
+            if hasattr(_field, "rel"):
+                return _field.rel.to.objects.filter(**self.condition)
+            elif hasattr(_field, "related_model"):
+                # django 2.0
+                return _field.related_model.objects.filter(**self.condition)
+            else:
+                raise Exception("不支持的django版本！")
+        else:
+            if hasattr(_field, "rel"):
+                return _field.rel.to.objects.all()
+            elif hasattr(_field, "related_model"):
+                # django 2.0
+                return _field.related_model.objects.all()
+            else:
+                raise Exception("不支持的django版本！")
+
+    def get_choices(self, _field):
+        return _field.choices
+
+
+class FilterRow:
+    """处理组合搜索数据"""
+
+    def __init__(self, data, option, request):
+        self.data = data
+        self.option = option
+        self.request = request
+        self.params = deepcopy(request.GET)
+
+    def __iter__(self):
+        self.params._mutable = True
+
+        if self.params.get(self.option.field_name):
+            # 当该项条件有选择时，删除已选，生成不包含当前选项条件的url
+            current_id_list = self.params.pop(self.option.field_name)
+            url = self.request.path_info + '?{0}'.format(self.params.urlencode())
+            yield mark_safe("<a href='{0}'>{1}</a>".format(url, "全部"))
+            self.params.setlist(self.option.field_name, current_id_list)
+        else:
+            # 当该项无选择时，直接生成当前的url
+            url = self.request.path_info + '?{0}'.format(self.params.urlencode())
+            yield mark_safe("<a class='active' href='{0}'>{1}</a>".format(url, "全部"))
+
+        # 循环每一项，对每一项包含的条件进行操作
+        for value in self.data:
+            # 获取当前url的筛选条件
+            current_id_list = self.params.getlist(self.option.field_name)
+
+            # 数据时元组还是对象，需要分开处理
+            if self.option.is_choices:
+                pk, text = str(value[0]), value[1]
+            else:
+                pk, text = str(value.pk), str(value)
+
+            # 深拷贝一份临时QueryDict, 避免相同筛选选项下不同条件互相干扰
+            _params = deepcopy(self.params)
+
+            # 当该条件已被包含在当前条件，给条件增加active
+            if pk in current_id_list:
+                # 若为多选，url则为取消该条件
+                if self.option.is_multi:
+                    current_id_list.remove(pk)
+                    _params.setlist(self.option.field_name, current_id_list)
+                    url = self.request.path_info + '?{0}'.format(_params.urlencode())
+                    yield mark_safe('<a class="active" href="{0}">{1}</a>'.format(url, text))
+                # 若为单选，url则不操作
+                else:
+                    url = self.request.path_info + '?{0}'.format(_params.urlencode())
+                    yield mark_safe('<a class="active" href="{0}">{1}</a>'.format(url, text))
+            # 当该条件不是当前已选中条件
+            else:
+                # 若为多选，url则在已有条件上增加该条件
+                if self.option.is_multi:
+                    current_id_list.append(pk)
+                    _params.setlist(self.option.field_name, current_id_list)
+                    url = self.request.path_info + '?{0}'.format(_params.urlencode())
+                    yield mark_safe('<a href="{0}">{1}</a>'.format(url, text))
+                # 若为单选，url则替换原有条件
+                else:
+                    _params[self.option.field_name] = pk
+                    url = self.request.path_info + '?{0}'.format(_params.urlencode())
+                    yield mark_safe('<a href="{0}">{1}</a>'.format(url, text))
 
 
 class ShowList:
@@ -32,8 +128,10 @@ class ShowList:
         self.show_actions_form = config.get_show_actions_form()
         self.actions = config.get_actions()
 
+        self.combinatorial_filter = config.get_combinatorial_filter()
+
         # 分页展示
-        self.pager = Pagination(config.request, len(data_list), per_page_num=2)
+        self.pager = Pagination(config.request, len(data_list), per_page_num=5)
         self.data_list = ShowList.generate_list(data_list[self.pager.start:self.pager.end], config)
 
     @staticmethod
@@ -51,23 +149,30 @@ class ShowList:
                     temp = getattr(data_obj, item)
                 else:
                     raise Exception("数据库没有该字段！")
-            # 针对config类
-            elif isinstance(item, MethodType):
-                temp = item(config=config, data_obj=data_obj)
-            # 针对model
             elif isinstance(item, FunctionType):
-                temp = item(data_obj)
+                if item.__name__ == "__str__":
+                    temp = item(data_obj)
+                else:
+                    temp = item(config, data_obj)
             else:
                 raise Exception("使用了无效字段！")
             yield temp
+
+    def generate_combinatorial_filter(self):
+        for option in self.combinatorial_filter:
+            _field = self.model_class._meta.get_field(option.field_name)
+            if isinstance(_field, ForeignKey):
+                yield FilterRow(option.get_queryset(_field), option, self.config.request)
+            elif isinstance(_field, ManyToManyField):
+                yield FilterRow(option.get_queryset(_field), option, self.config.request)
+            else:
+                yield FilterRow(option.get_choices(_field), option, self.config.request)
 
 
 class AutomodelConfig:
     """针对每一个加载的model的具体处理"""
 
-    # TODO: 补全可配置参数，modelform,搜索,action
     # 可配置参数
-
     # 1. 定制显示列
     list_display = []
 
@@ -79,13 +184,13 @@ class AutomodelConfig:
         else:
             result.append(self.model_class.__str__)
 
-        result.insert(0, self.checkbox)
+        result.insert(0, AutomodelConfig.checkbox)
 
         if self.get_show_edit_btn():
-            result.append(self.edit)
+            result.append(AutomodelConfig.edit)
 
         if self.get_show_delete_btn():
-            result.append(self.delete)
+            result.append(AutomodelConfig.delete)
         return result
 
     # 2. 定制显示项的表头
@@ -103,7 +208,7 @@ class AutomodelConfig:
                 if isinstance(field_name, str):
                     verbose_name = self.model_class._meta.get_field(field_name).verbose_name
 
-                elif isinstance(field_name, MethodType):
+                elif isinstance(field_name, FunctionType):
                     verbose_name = field_name(self, is_header=True)
 
                 else:
@@ -208,6 +313,15 @@ class AutomodelConfig:
     multi_delete.short_description = "批量删除"
     actions = [multi_delete, ]
 
+    # 9. 组合搜索
+    combinatorial_filter = []
+
+    def get_combinatorial_filter(self):
+        result = []
+        if self.combinatorial_filter:
+            result.extend(self.combinatorial_filter)
+        return result
+
     def __init__(self, model_class):
         self.model_class = model_class
         self.model_name = model_class._meta.model_name
@@ -255,7 +369,16 @@ class AutomodelConfig:
                 ret = getattr(self, func)(request)
                 if ret:
                     return ret
-        data_list = self.model_class.objects.filter(self.get_search_condition())
+        comb_con = {}
+        # 获取URL中GET里面的键
+        for key in request.GET.keys():
+            # 获取配置中的筛选条件
+            for option in self.get_combinatorial_filter():
+                # 当GET的键在筛选条件中，则加入筛选条件
+                if key == option.field_name:
+                    comb_con.setdefault("{0}__in".format(option.field_name), request.GET.getlist(option.field_name))
+                    break
+        data_list = self.model_class.objects.filter(self.get_search_condition()).filter(**comb_con).distinct()
         content = ShowList(self, data_list)
 
         return render(request, "automodel/show_list.html", {"content": content})
@@ -307,13 +430,13 @@ class AutomodelConfig:
         return redirect(self.get_list_url()+"?%s" % request.GET.get(self._query_key))
 
     # #############     定制列表页面显示的列
-    def checkbox(self, data_obj=None, is_header=False, config=None):
+    def checkbox(self, data_obj=None, is_header=False):
         """勾选框"""
         if is_header:
             return "选择"
         return mark_safe('<input type="checkbox" name="pk" value="%s">' % data_obj.pk)
 
-    def delete(self, data_obj=None, is_header=False, config=None):
+    def delete(self, data_obj=None, is_header=False):
         """删除按钮"""
         if is_header:
             return "删除"
@@ -321,12 +444,12 @@ class AutomodelConfig:
         if self.request.GET.urlencode():
             params = QueryDict(mutable=True)
             params[self._query_key] = self.request.GET.urlencode()
-            query_str = '<a href="%s?%s">删除</a>' % (config.get_delete_url(data_obj.pk), params.urlencode())
+            query_str = '<a href="%s?%s">删除</a>' % (self.get_delete_url(data_obj.pk), params.urlencode())
         else:
-            query_str = '<a href="%s">删除</a>' % config.get_delete_url(data_obj.pk)
+            query_str = '<a href="%s">删除</a>' % self.get_delete_url(data_obj.pk)
         return mark_safe(query_str)
 
-    def edit(self, data_obj=None, is_header=False, config=None):
+    def edit(self, data_obj=None, is_header=False):
         """编辑按钮"""
         if is_header:
             return "编辑"
@@ -334,9 +457,9 @@ class AutomodelConfig:
         if self.request.GET.urlencode():
             params = QueryDict(mutable=True)
             params[self._query_key] = self.request.GET.urlencode()
-            query_str = '<a href="%s?%s">编辑</a>' % (config.get_change_url(data_obj.pk), params.urlencode())
+            query_str = '<a href="%s?%s">编辑</a>' % (self.get_change_url(data_obj.pk), params.urlencode())
         else:
-            query_str = '<a href="%s">编辑</a>' % config.get_change_url(data_obj.pk)
+            query_str = '<a href="%s">编辑</a>' % self.get_change_url(data_obj.pk)
         return mark_safe(query_str)
 
     # #############     反向获取url

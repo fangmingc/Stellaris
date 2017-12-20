@@ -1,8 +1,25 @@
 {% extends "automodel/base.html" %}
 
+{% block style %}
+    <style>
+    .combinatorial-filter a{
+        display: inline-block;
+        text-decoration: none;
+        padding: 3px 5px;
+        margin: 2px 0;
+        border: 1px solid #337ab7;
+    }
+    .combinatorial-filter a.active{
+        background-color: #337ab7;
+        color: white;
+    }
+    </style>
+{% endblock %}
+
 {% block container %}
     <div class="container">
         <h1>列表页面</h1>
+
         <form method="get">
         {% if content.show_search_form %}
             <input type="text" name="{{ content.search_key }}" placeholder="请输入搜索内容" class="form-control"
@@ -10,6 +27,7 @@
             <button class="btn btn-primary"><span class="glyphicon glyphicon-search"></span></button>
         {% endif %}
         </form>
+
         <form method="post">
         {% csrf_token %}
         {% if content.show_actions_form %}
@@ -21,9 +39,21 @@
             </select>
             <button class="btn btn-primary">执行</button>
         {% endif %}
+
+        <div class="combinatorial-filter">
+            {% for filter_row in content.generate_combinatorial_filter  %}
+                <div>
+                {% for row in filter_row %}
+                    {{ row }}
+                {% endfor %}
+                </div>
+            {% endfor %}
+        </div>
+
         {% if content.show_add_btn %}
             <h3><a href="{{ content.add_url }}">增加</a></h3>
         {% endif %}
+
         <table class="table table-bordered table-striped">
             <thead>
             <tr>
@@ -44,7 +74,9 @@
 
             </tbody>
         </table>
-    {{ content.pager.bootstrap_html }}
+
+        {{ content.pager.bootstrap_html }}
+
         </form>
     </div>
 {% endblock %}

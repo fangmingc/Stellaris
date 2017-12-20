@@ -32,15 +32,6 @@ class Pagination:
         :param max_pager_count: 最大页码总数
         :param mode: 提供简洁版、数字版、完整版的分页显示
         """
-        # 当前页
-        params = deepcopy(request.GET)
-        params._mutable = True
-        current_page = params.get(page_key, '')
-        try:
-            self.current_page = int(current_page)
-        except ValueError as error:
-            print(current_page)
-            self.current_page = 1
 
         # 每页条数
         self.per_page_num = per_page_num
@@ -49,6 +40,17 @@ class Pagination:
         res, oth = divmod(data_length, self.per_page_num)
         self.total_pages = res if oth == 0 else res + 1
         self.pager_key = page_key
+
+        # 当前页
+        params = deepcopy(request.GET)
+        params._mutable = True
+        current_page = params.get(page_key, '')
+        try:
+            self.current_page = int(current_page)
+        except ValueError as error:
+            self.current_page = 1
+        if self.current_page not in range(1, self.total_pages + 1):
+            self.current_page = 1
 
         # 最大显示页码数(奇数)
         self.max_pager_count = max_pager_count
