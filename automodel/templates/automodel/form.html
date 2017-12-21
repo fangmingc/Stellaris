@@ -1,0 +1,17 @@
+<form action="" method="post" novalidate>
+    {% csrf_token %}
+    {% for item in form %}
+        <div style="position: relative">
+            <label for="{{ item.field.id_for_label }}">{{ item.field.label }}</label>
+            {{ item.field }}
+        <span class="help-block">{{ item.field.errors }}</span>
+        <div style="position: absolute;top: 1px;left: 60px;z-index: 9999">
+        {% if item.is_popup %}
+            <a onclick="popUp('{{ item.pop_url }}?_popupkey={{ item.field.auto_id }}')">
+                <span class="glyphicon glyphicon-plus"></span></a>
+        {% endif %}
+        </div>
+        </div>
+    {% endfor %}
+    <input type="submit" class="btn btn-primary" value="提交">
+</form>

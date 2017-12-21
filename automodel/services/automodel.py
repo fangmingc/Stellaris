@@ -1,6 +1,7 @@
 from types import FunctionType, MethodType
 from functools import wraps
 from copy import deepcopy
+import json
 
 from django.shortcuts import HttpResponse, render, reverse, redirect
 from django.urls import path
@@ -209,7 +210,10 @@ class AutomodelConfig:
                     verbose_name = self.model_class._meta.get_field(field_name).verbose_name
 
                 elif isinstance(field_name, FunctionType):
-                    verbose_name = field_name(self, is_header=True)
+                    if field_name.__name__ == "__str__":
+                        verbose_name = "对象"
+                    else:
+                        verbose_name = field_name(self, is_header=True)
 
                 else:
                     verbose_name = "对象"
@@ -389,12 +393,19 @@ class AutomodelConfig:
                 model = self.model_class
                 fields = "__all__"
         if request.method == "GET":
-            return render(request, "automodel/add_list.html", {"form": TempModelForm()})
+            form = TempModelForm()
+            return render(request, "automodel/add_list.html", {"form": form})
         form = TempModelForm(data=request.POST)
         if not form.is_valid():
             return render(request, "automodel/add_list.html", {"form": form})
         else:
-            form.save()
+            new_obj = form.save()
+
+            if request.GET.get("_popupkey"):
+                data = {"pk": new_obj.pk, "text": str(new_obj), "popup_id": request.GET.get("_popupkey")}
+
+                return render(request, "automodel/pop_response.html", {"json_data": json.dumps(data)})
+
             return redirect(self.get_list_url())
 
     def change_list_view(self, request, *args, **kwargs):
@@ -415,6 +426,12 @@ class AutomodelConfig:
             return render(request, "automodel/change_list.html", {"form": form})
         else:
             form.save()
+            new_obj = form.save()
+
+            if request.GET.get("_popupkey"):
+                data = {"pk": new_obj.pk, "text": str(new_obj), "popup_id": request.GET.get("_popupkey")}
+
+                return render(request, "automodel/pop_response.html", {"json_data": json.dumps(data)})
             return redirect(self.get_list_url()+"?%s" % request.GET.get(self._query_key))
 
     def delete_list_view(self, request, *args, **kwargs):

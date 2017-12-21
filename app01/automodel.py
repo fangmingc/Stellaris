@@ -24,6 +24,8 @@ class UserConfig(automodel.AutomodelConfig):
     show_search_form = True
     show_actions_form = True
 
+    search_fields = ["username", "email"]
+
     combinatorial_filter = [
         automodel.FilterOption("gender", is_choices=True),
         automodel.FilterOption("dep"),

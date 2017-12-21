@@ -1,17 +1,10 @@
 {% extends "automodel/base.html" %}
-
+{% load form_tags %}
 {% block container %}
     <div class="container">
     <h1>添加列表页面</h1>
     <div class="col-md-6">
-        <form action="" method="post" novalidate>
-            {% csrf_token %}
-            {% for item in form %}
-                <p><label for="{{ item.id_for_label }}">{{ item.label }}</label>{{ item }}
-                <span class="help-block">{{ item.errors }}</span></p>
-            {% endfor %}
-            <input type="submit" class="btn btn-primary" value="提交">
-        </form>
+        {% add_change_form form %}
     </div>
     </div>
 {% endblock %}
@@ -19,6 +12,19 @@
 {% block script %}
     <script>
     $("form").find("input").addClass("form-control");
-    $("form").find("select").addClass("form-control")
+    $("form").find("select").addClass("form-control");
+
+    function popUpCallback(data) {
+        var aim_obj = document.getElementById(data.popup_id);
+        var new_option = document.createElement("option");
+        new_option.innerHTML = data.text;
+        new_option.setAttribute("value", data.pk);
+        new_option.setAttribute("selected", "selected");
+        aim_obj.appendChild(new_option)
+    }
+    function popUp(url) {
+        window.open(url, "popup", "status=1, width=700, height=500, left=400, top=150")
+    }
+
     </script>
 {% endblock %}

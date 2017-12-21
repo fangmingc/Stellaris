@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>正在关闭。。。</title>
+</head>
+<body>
+<script>
+    (function () {
+        opener.popUpCallback({{ json_data|safe }});
+        window.close()
+    })()
+</script>
+</body>
+</html>
